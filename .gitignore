@@ -1,0 +1,21 @@
+# Built binaries
+gh-image
+*.exe
+
+# GoReleaser output
+dist/
+
+# Vendor directory
+vendor/
+
+# Test binaries
+*.test
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.idea/
+.vscode/
+*.swp
