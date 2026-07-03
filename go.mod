@@ -2,7 +2,10 @@ module github.com/drogers0/gh-image
 
 go 1.26.1
 
-require github.com/browserutils/kooky v0.2.9
+require (
+	github.com/browserutils/kooky v0.2.9
+	golang.org/x/crypto v0.51.0
+)
 
 require (
 	github.com/browserutils/ese v0.0.0-20260314233042-37b6a03a93ce // indirect
@@ -11,8 +14,7 @@ require (
 	github.com/gonuts/binary v0.2.0 // indirect
 	github.com/keybase/go-keychain v0.0.1 // indirect
 	github.com/zalando/go-keyring v0.2.7 // indirect
-	golang.org/x/crypto v0.48.0 // indirect
-	golang.org/x/net v0.50.0 // indirect
-	golang.org/x/sys v0.41.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 )
