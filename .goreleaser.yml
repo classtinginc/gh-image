@@ -1,12 +1,41 @@
 version: 2
 
 builds:
-  - binary: gh-image
+  # Default provider: kooky. This is the binary `gh extension install` resolves.
+  - id: kooky
+    binary: gh-image
     main: .
     env:
       - CGO_ENABLED=0
     ldflags:
-      - -s -w
+      - -s -w -X main.version={{.Version}}
+    goos:
+      - darwin
+      - linux
+      - windows
+      - android
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+      # android/amd64 requires external (cgo) linking; we build with CGO_ENABLED=0.
+      - goos: android
+        goarch: amd64
+
+  # Alternate provider: HackBrowserData (-tags hbd). Shipped as extra `hbd-*`
+  # assets for manual download; `gh extension install` still gets the kooky build.
+  # No android: HackBrowserData targets desktop browsers only.
+  - id: hbd
+    binary: gh-image
+    main: .
+    flags:
+      - -tags=hbd
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}}-hbd
     goos:
       - darwin
       - linux
@@ -19,9 +48,38 @@ builds:
         goarch: arm64
 
 archives:
-  - format: binary
+  - id: default
+    ids:
+      - kooky
+    formats:
+      - binary
     name_template: "{{ .Os }}-{{ .Arch }}"
+  - id: hbd
+    ids:
+      - hbd
+    formats:
+      - binary
+    name_template: "hbd-{{ .Os }}-{{ .Arch }}"
 
 checksum:
   name_template: "checksums.txt"
   algorithm: sha256
+
+changelog:
+  use: github
+  sort: asc
+
+release:
+  # -rc / -beta tags are published as pre-releases, so `gh extension install`
+  # keeps serving the stable line.
+  prerelease: auto
+  header: |
+    Highlights since {{ .PreviousTag }}:
+
+    - **Post in one command with `--`** (#58): anything after `--` is a `gh` command, forwarded as written. The files upload first and their links land in the body — `gh image bug.png -- issue comment 42 --body-file repro.md`. Files `gh` can take go through its own `--attach`; everything else uploads on the existing routes, with the body's local-path references repointed at the uploaded assets either way.
+    - **Reframed around first-party attachments.** GitHub shipped `--attach` in [`gh` v2.99.0](https://github.com/cli/cli/releases/tag/v2.99.0) on 2026-09-01. The README now sends the common case there and states what it does not cover: any file type GitHub accepts, repositories you can only read, a link on its own, downloads, and CI (#59).
+
+    > [!WARNING]
+    > **`--` changed meaning.** It used to terminate flag parsing so a filename beginning with a dash could be passed positionally. It now marks the start of a `gh` command, so write such a filename as `./-name.png`. The old form fails with a clear error rather than doing something unexpected.
+
+    Full list below.

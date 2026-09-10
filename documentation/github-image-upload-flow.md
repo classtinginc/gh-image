@@ -2,15 +2,50 @@
 
 ## Overview
 
-GitHub does not provide a public API for uploading images to issues/PRs. The web UI uses an internal 3-step flow involving GitHub's servers and S3. This document describes exactly how that flow works, reverse-engineered from HAR captures.
+GitHub does not provide a public API for uploading attachments (images or files like PDFs and zips) to issues/PRs. Two undocumented routes exist, and this document describes both, reverse-engineered from HAR captures:
 
-Images uploaded this way are scoped to the repository's visibility — private repo images require authentication to view (unlike GitHub Release assets, which are always public on public repos).
+- A **single request** to `uploads.github.com`, authenticated with a bearer token. Images and video only, and only on repositories the token can push to.
+- The **3-step flow** the web UI uses on drag-and-drop, involving GitHub's servers and S3, authenticated with browser cookies. This serves everything, and is the fallback whenever the single request does not apply. It is identical for images and other files; only the finalize path and the resulting URL/markdown differ (noted in Step 3 and Final Result).
+
+Attachments uploaded either way are scoped to the repository's visibility — private repo uploads require authentication to view (unlike GitHub Release assets, which are always public on public repos).
 
 ## Prerequisites
 
-The only browser credential needed is the `user_session` cookie from `github.com`. GitHub also requires the `__Host-user_session_same_site` cookie for CSRF validation on the upload endpoints — this cookie has the same value as `user_session` (just with a stricter SameSite policy), so it can be synthesized from `user_session` rather than read separately. Everything else (CSRF tokens, S3 presigned URLs) is derived during the flow.
+The single request needs an OAuth token with push access to the target repository; `gh auth token` supplies one.
+
+The 3-step flow needs the `user_session` cookie from `github.com`. GitHub also requires the `__Host-user_session_same_site` cookie for CSRF validation on the upload endpoints — this cookie has the same value as `user_session` (just with a stricter SameSite policy), so it can be synthesized from `user_session` rather than read separately. Everything else (CSRF tokens, S3 presigned URLs) is derived during the flow.
+
+## The Single Request
+
+**Request:** `POST https://uploads.github.com/user-attachments/assets`
+
+**Query Parameters:** `name` (filename), `content_type` (MIME type), `repository_id` (numeric repository ID)
+
+**Headers:**
+
+| Header | Value |
+|---|---|
+| `Authorization` | `Bearer {token}` |
+| `Accept` | `application/json` |
+| `Content-Type` | The file's MIME type. **Mandatory** — without it the response is `400 Invalid Content-Type'` before anything else is validated. |
+| `Expect` | `100-continue` (optional). GitHub answers on the headers alone, so a rejected upload never sends its body. |
+
+**Body:** the raw file bytes.
+
+**Response:** `201 Created` with `{"url": "https://github.com/user-attachments/assets/{uuid}"}` — the same URL shape Step 3 of the flow below produces, and the only field returned.
+
+**Rejections:**
+
+| Response | Meaning |
+|---|---|
+| `422` `content_type is not included in the list of allowed content types` | Not an image or video. Use the flow below. |
+| `404` | No push access to `repository_id`, or the parameter is missing. |
+
+Encode the query with a proper URL encoder: an unescaped `+` in a type like `image/svg+xml` arrives as a space and is rejected.
 
 ## The Flow
+
+Used for every file the single request cannot take.
 
 ### Step 0: Obtain the `uploadToken`
 
@@ -92,7 +127,7 @@ This token serves as the `authenticity_token` for the upload policy request (Ste
 ```
 
 **Key fields in response:**
-- `asset.href` — The final URL where the image will be served
+- `asset.href` — The final URL where the attachment will be served
 - `asset.id` — Used in the finalize step
 - `form` — All fields needed for the S3 upload (presigned)
 - `upload_url` — The S3 endpoint to POST to
@@ -131,9 +166,12 @@ This token serves as the `authenticity_token` for the upload policy request (Ste
 
 ### Step 3: Finalize the Upload
 
-**Request:** `PUT https://github.com/upload/assets/{asset_id}`
+**Request:** `PUT https://github.com{asset_upload_url}`
 
-Where `{asset_id}` is `asset.id` from the Step 1 response.
+Where `asset_upload_url` is taken verbatim from the Step 1 response. GitHub routes the
+finalize to a different path per file type: `/upload/assets/{id}` for images and
+`/upload/repository-files/{id}` for other files (PDF, zip, …). Use the server-provided
+path rather than hardcoding one.
 
 **Content-Type:** `multipart/form-data`
 
@@ -163,20 +201,24 @@ Where `{asset_id}` is `asset.id` from the Step 1 response.
 
 ## Final Result
 
-The `href` value is the permanent image URL:
+The `href` value is the permanent attachment URL. Its shape depends on the file type:
 ```
-https://github.com/user-attachments/assets/{uuid}
+https://github.com/user-attachments/assets/{uuid}        # images
+https://github.com/user-attachments/files/{id}/{name}    # other files (PDF, zip, …)
 ```
 
-This can be embedded in any GitHub markdown (PR descriptions, issue bodies, comments) as:
+It can be referenced in any GitHub markdown (PR descriptions, issue bodies, comments). Images
+embed inline; other files render as a download link:
 ```markdown
 ![alt text](https://github.com/user-attachments/assets/{uuid})
+[report.pdf](https://github.com/user-attachments/files/{id}/report.pdf)
 ```
 
 ## Authentication Summary
 
 | Step | Auth Required |
 |---|---|
+| Single request | `Authorization: Bearer {token}` with push access to the repository |
 | 0 (repo page) | `user_session` + `__Host-user_session_same_site` cookies |
 | 1 (upload policy) | `user_session` + `__Host-user_session_same_site` cookies + `uploadToken` as `authenticity_token` |
 | 2 (S3 upload) | None (presigned URL) |
@@ -197,15 +239,15 @@ POST /upload/policies/assets  (authenticity_token = uploadToken)
  └─> asset_upload_authenticity_token (in JSON response)
       │
       ▼
-PUT /upload/assets/{id}  (authenticity_token = asset_upload_authenticity_token)
+PUT {asset_upload_url}  (authenticity_token = asset_upload_authenticity_token)
 ```
 
 Each step produces the token needed for the next GitHub-authenticated step. The S3 upload (Step 2) uses a self-contained presigned policy and needs no GitHub tokens.
 
 ## Caveats
 
-- This is an undocumented internal API. It could change without notice.
-- The `uploadToken` is only present on repository pages when the authenticated user has write access.
+- Both routes are undocumented internal APIs. Either could change without notice.
+- The `uploadToken` is usually present on repository pages for any user who can view the repo. An invalid or expired `user_session` is the case where it is absent.
 - The `repository_id` must correspond to a repo the user has access to.
 - The presigned S3 policy has an expiration window (observed ~30 minutes).
 - File size in the policy request must match the actual file size exactly.

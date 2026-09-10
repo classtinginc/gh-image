@@ -7,25 +7,39 @@ on:
 
 permissions:
   contents: write
+  id-token: write      # OIDC identity for provenance signing
+  attestations: write
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: stable
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
-          version: latest
+          version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Binds each released binary to this repo, workflow, and commit, so users can
+      # run `gh attestation verify <file> --owner drogers0` before installing.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          # Binaries live in per-build-id subdirs (dist/<id>_<target>/); the binary
+          # format archives upload these same bytes, so attesting them by content
+          # covers every downloadable asset (default and hbd variants alike).
+          subject-path: |
+            dist/**/gh-image
+            dist/**/gh-image.exe

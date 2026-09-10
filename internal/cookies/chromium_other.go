@@ -2,11 +2,7 @@
 
 package cookies
 
-import (
-	"fmt"
-	"net/http"
-)
-
-func directReadGitHubSession() (*http.Cookie, error) {
-	return nil, fmt.Errorf("direct cookie reader not supported on this platform")
-}
+// directReadRawCookies is a no-op off macOS. The direct reader exists to cover
+// Arc, which ships on macOS only; everywhere else the build-tag-selected
+// provider is the whole story.
+func directReadRawCookies() ([]rawCookie, error) { return nil, nil }
