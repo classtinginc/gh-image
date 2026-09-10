@@ -1,0 +1,29 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - run: go vet ./...
+      - run: go test -race -cover ./...
+      - run: go build ./...
+      - name: Cross-compile android/arm64
+        run: GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build -o /dev/null .
+      - name: hackbrowserdata provider (-tags hbd)
+        run: |
+          go vet -tags hbd ./...
+          go test -tags hbd -cover ./...
+          go build -tags hbd ./...
+      - name: Cross-compile hbd provider (darwin, windows)
+        run: |
+          GOOS=darwin GOARCH=arm64 go build -tags hbd -o /dev/null .
+          GOOS=windows GOARCH=amd64 go build -tags hbd -o /dev/null .

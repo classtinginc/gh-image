@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/drogers0/gh-image/internal/httputil"
 )
 
 // uploadToS3 uploads the file to S3 using the presigned form fields from the policy.
@@ -64,7 +66,7 @@ func uploadToS3(policy *policyResponse, filePath, fileName, contentType string) 
 	if err != nil {
 		return fmt.Errorf("opening file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if _, err := io.Copy(part, f); err != nil {
 		return fmt.Errorf("writing file data: %w", err)
@@ -80,14 +82,14 @@ func uploadToS3(policy *policyResponse, filePath, fileName, contentType string) 
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Origin", "https://github.com")
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", httputil.UserAgent)
 
 	// S3 upload uses no GitHub cookies — the presigned policy handles auth.
 	resp, err := (&http.Client{Timeout: 120 * time.Second}).Do(req)
 	if err != nil {
 		return fmt.Errorf("S3 upload request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		respBody, _ := io.ReadAll(resp.Body)
